@@ -11,6 +11,7 @@ local function close_buffer_or_window_or_exit()
 	local current_buf = vim.api.nvim_get_current_buf()
 	local current_win = vim.api.nvim_get_current_win()
 	local windows_with_buffer = vim.fn.win_findbuf(current_buf)
+
 	-- Function to count visible windows
 	local function count_visible_windows()
 		local count = 0
@@ -36,45 +37,44 @@ local function close_buffer_or_window_or_exit()
 
 	-- Function to find the next valid buffer
 	local function find_next_buffer()
+		-- First try alternate buffer
 		local alternate = vim.fn.bufnr("#")
 		if alternate ~= -1 and vim.api.nvim_buf_is_valid(alternate) and vim.bo[alternate].buflisted then
 			return alternate
 		end
 
-		-- Get buffer history
-		local buffer_history = {}
-		for i = 1, vim.fn.bufnr("$") do
-			if vim.api.nvim_buf_is_valid(i) and vim.bo[i].buflisted then
-				table.insert(buffer_history, { bufnr = i, lastused = vim.fn.getbufinfo(i)[1].lastused })
+		-- Then try the most recently used buffer
+		local mru_buf = nil
+		local max_lastused = 0
+		for _, buf in ipairs(listed_buffers) do
+			if buf ~= current_buf then
+				local lastused = vim.fn.getbufinfo(buf)[1].lastused
+				if lastused > max_lastused then
+					max_lastused = lastused
+					mru_buf = buf
+				end
 			end
 		end
 
-		-- Sort buffers by last used time
-		table.sort(buffer_history, function(a, b)
-			return a.lastused > b.lastused
-		end)
-
-		-- Find the most recently used buffer that's not the current one
-		for _, buf in ipairs(buffer_history) do
-			if buf.bufnr ~= current_buf then
-				return buf.bufnr
-			end
-		end
-
-		return nil
+		return mru_buf
 	end
 
 	-- Function to safely close buffer
 	local function close_buffer()
-		-- local wins = vim.fn.getbufinfo(current_buf)[1].windows
 		local next_buf = find_next_buffer()
+
 		if next_buf then
-			vim.api.nvim_win_set_buf(current_win, next_buf)
+			-- Try to switch to the next buffer first
+			local ok = pcall(vim.api.nvim_win_set_buf, current_win, next_buf)
+			if not ok then
+				vim.notify("Failed to switch to next buffer", vim.log.levels.WARN)
+				return
+			end
 		else
 			vim.cmd("enew")
 		end
 
-		-- Now close the buffer
+		-- Now try to close the buffer
 		local ok, err = pcall(function()
 			vim.cmd("bdelete " .. current_buf)
 		end)
@@ -99,24 +99,28 @@ end
 -- Function to set up the key mapping for a buffer
 local function setup_buffer_mapping(bufnr)
 	bufnr = bufnr or vim.api.nvim_get_current_buf()
-	local buf_type = vim.bo[bufnr].buftype
-	local buf_listed = vim.bo[bufnr].buflisted
-	if buf_type == "" and buf_listed then
-		vim.api.nvim_buf_set_keymap(bufnr, "n", M.config.close_key, "", {
-			callback = function()
-				if M.enabled then
-					close_buffer_or_window_or_exit()
-				else
-					-- Execute the default behavior when plugin is disabled
-					local default_action = vim.api.nvim_replace_termcodes(M.config.close_key, true, false, true)
-					vim.api.nvim_feedkeys(default_action, "n", false)
-				end
-			end,
-			noremap = true,
-			silent = true,
-			desc = "Close or quit",
-		})
+
+	-- Check if the key is already mapped
+	local mappings = vim.api.nvim_buf_get_keymap(bufnr, "n")
+	for _, map in ipairs(mappings) do
+		if map.lhs == M.config.close_key then
+			return
+		end
 	end
+
+	vim.api.nvim_buf_set_keymap(bufnr, "n", M.config.close_key, "", {
+		callback = function()
+			if M.enabled then
+				close_buffer_or_window_or_exit()
+			else
+				-- Execute the default behavior when plugin is disabled
+				local default_action = vim.api.nvim_replace_termcodes(M.config.close_key, true, false, true)
+				vim.api.nvim_feedkeys(default_action, "n", false)
+			end
+		end,
+		noremap = true,
+		silent = true,
+	})
 end
 
 -- Function to set up autocommands
