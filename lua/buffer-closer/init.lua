@@ -153,6 +153,7 @@ function M.setup(opts)
 	-- Add user commands
 	vim.api.nvim_create_user_command("BuffClsDisable", disable_plugin, {})
 	vim.api.nvim_create_user_command("BuffClsEnable", enable_plugin, {})
+	vim.api.nvim_create_user_command("BuffCls", close_buffer_or_window_or_exit, {})
 end
 
 return M
